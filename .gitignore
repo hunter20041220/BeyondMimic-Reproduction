@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# Local environments and caches
+envs/
+cache/
+tmp/
+.env
+
+# Large experiment artifacts
+data/raw/*
+data/processed/*
+data/teacher_rollouts/*
+data/state_latent/*
+checkpoints/tracking/*
+checkpoints/vae/*
+checkpoints/diffusion/*
+outputs/videos/*
+outputs/figures/*
+outputs/metrics/*
+outputs/logs/*
+
+# Keep documented directory placeholders
+!data/**/.gitkeep
+!checkpoints/**/.gitkeep
+!outputs/**/.gitkeep
+!data/README.md
+!checkpoints/README.md
+!outputs/README.md
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/

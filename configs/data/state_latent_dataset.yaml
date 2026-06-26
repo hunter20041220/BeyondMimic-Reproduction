@@ -1,0 +1,6 @@
+rollout: data/teacher_rollouts/teacher_rollout_train.npz
+output: data/state_latent/train_windows.npz
+latent_dim: 32
+token_layout:
+  token: [state, latent]
+  split_axis: feature

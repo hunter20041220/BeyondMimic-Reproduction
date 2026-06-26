@@ -1,0 +1,3 @@
+-r base.txt
+mujoco>=3.2
+imageio>=2.34

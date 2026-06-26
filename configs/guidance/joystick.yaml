@@ -1,0 +1,4 @@
+dataset: data/state_latent/train_windows.npz
+task: joystick
+target_velocity_xy: [0.03, 0.0]
+step_size: 0.05

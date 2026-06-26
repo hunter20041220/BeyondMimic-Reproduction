@@ -1,0 +1,7 @@
+rollout: data/teacher_rollouts/teacher_rollout_train.npz
+summary: outputs/metrics/tracking_eval_summary.json
+metrics:
+  - rollout_count
+  - horizon
+  - state_dim
+  - action_dim

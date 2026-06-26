@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "beyondmimic-repro"
+version = "0.1.0"
+description = "Clean public-resource reproduction pipeline for BeyondMimic-style motion tracking, VAE, diffusion, and guidance."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+  { name = "BeyondMimic Reproduction Contributors" }
+]
+dependencies = [
+  "numpy>=1.24",
+  "pyyaml>=6.0",
+  "tqdm>=4.65"
+]
+
+[project.optional-dependencies]
+torch = [
+  "torch>=2.1"
+]
+analysis = [
+  "matplotlib>=3.7",
+  "pandas>=2.0",
+  "scipy>=1.10"
+]
+dev = [
+  "pytest>=8.0"
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

@@ -1,0 +1,11 @@
+dataset: data/state_latent/train_windows.npz
+checkpoint: checkpoints/diffusion/denoiser_latest.pt
+metrics: outputs/metrics/diffusion_metrics.json
+hidden_dim: 128
+depth: 2
+heads: 4
+dropout: 0.0
+epochs: 5
+batch_size: 64
+diffusion_steps: 100
+lr: 0.001

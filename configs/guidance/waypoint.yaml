@@ -1,0 +1,4 @@
+dataset: data/state_latent/train_windows.npz
+task: waypoint
+waypoint_xy: [1.0, 0.0]
+step_size: 0.05

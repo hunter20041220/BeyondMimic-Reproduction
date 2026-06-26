@@ -1,0 +1,7 @@
+input: data/raw/lafan1
+output: data/processed/lafan1_g1.npz
+format:
+  row_dim: 36
+  root_pos: [0, 3]
+  root_quat_xyzw: [3, 7]
+  g1_action_29d: [7, 36]

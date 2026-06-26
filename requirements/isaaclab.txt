@@ -1,0 +1,5 @@
+# Optional. Install Isaac Sim / IsaacLab according to NVIDIA's platform-specific
+# instructions first, then install this package in editable mode.
+# The reproduction code keeps IsaacLab-dependent tracking entrypoints separate
+# from the lightweight VAE/diffusion/guidance pipeline.
+rsl-rl-lib>=2.3

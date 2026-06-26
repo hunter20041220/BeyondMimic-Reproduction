@@ -1,0 +1,4 @@
+dataset: data/state_latent/train_windows.npz
+task: inpainting
+keyframe_fraction: 0.5
+step_size: 0.05

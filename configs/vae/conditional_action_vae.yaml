@@ -1,0 +1,9 @@
+dataset: data/teacher_rollouts/teacher_rollout_train.npz
+checkpoint: checkpoints/vae/vae_latest.pt
+metrics: outputs/metrics/vae_metrics.json
+latent_dim: 32
+hidden_dim: 256
+epochs: 5
+batch_size: 512
+lr: 0.001
+beta: 0.001

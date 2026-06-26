@@ -1,0 +1,5 @@
+dataset: data/state_latent/train_windows.npz
+task: obstacle
+obstacle_xy: [0.5, 0.0]
+radius: 0.2
+step_size: 0.05

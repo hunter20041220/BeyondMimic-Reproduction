@@ -1,0 +1,12 @@
+robot: unitree_g1
+simulator: isaaclab
+control_frequency_hz: 50
+sim_dt: 0.005
+decimation: 4
+action_dim: 29
+policy:
+  actor_hidden_dims: [512, 256, 128]
+  critic_hidden_dims: [512, 256, 128]
+outputs:
+  rollout_schema: data/teacher_rollouts/teacher_rollout_train.npz
+note: "This repository does not include official BeyondMimic tracking checkpoints."

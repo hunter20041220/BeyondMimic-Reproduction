@@ -1,0 +1,8 @@
+input: data/processed/lafan1_g1.npz
+output: data/teacher_rollouts/teacher_rollout_train.npz
+horizon: 64
+stride: 16
+schema:
+  states: [rollout, horizon, state_dim]
+  actions: [rollout, horizon, 29]
+note: "A full IsaacLab tracker can write the same NPZ schema; this config also supports the public-motion fallback."

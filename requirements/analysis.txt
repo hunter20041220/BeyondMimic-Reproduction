@@ -1,0 +1,5 @@
+-r base.txt
+matplotlib>=3.7
+pandas>=2.0
+scipy>=1.10
+pytest>=8.0

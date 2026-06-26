@@ -1,0 +1,9 @@
+cff-version: 1.2.0
+message: "If this reproduction code helps your work, please cite the BeyondMimic paper and this repository."
+title: "BeyondMimic-Reproduction"
+version: "0.1.0"
+date-released: "2026-06-26"
+authors:
+  - name: "BeyondMimic Reproduction Contributors"
+repository-code: "https://github.com/hunter20041220/BeyondMimic-Reproduction"
+license: "MIT"
