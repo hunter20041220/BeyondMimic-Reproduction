@@ -124,6 +124,8 @@ python scripts/09_isaac/collect_dagger_round.py --help
 
 See:
 
+- `docs/rtx4090_handoff_guide.md`
+- `docs/rtx4090_handoff_guide_zh.md`
 - `docs/stage2_stage3_status.md`
 - `docs/data_contracts_stage2_stage3.md`
 - `docs/transfer_to_4090.md`
