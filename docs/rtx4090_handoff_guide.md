@@ -1274,4 +1274,3 @@ Controller mismatch:
 
 - `adapters/mujoco/shared_controller_contract.py`
 - verify joint order, action scale, Kp/Kd, qpos/qvel mapping
-
