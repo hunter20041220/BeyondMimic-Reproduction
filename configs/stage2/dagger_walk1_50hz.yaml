@@ -1,0 +1,17 @@
+schema_version: stage2-dagger-config-v1
+motion_set: walk1
+task_name: Tracking-Flat-G1-v0
+frequency_hz: 50.0
+dt: 0.02
+teacher_map: null
+checkpoint_root: null
+data_root: null
+dataset:
+  schema_version: stage2-dagger-v1
+  aggregation: D0 union D1 union D2
+collection:
+  student_executes_action: true
+  teacher_action_is_supervision_only: true
+  num_envs: 4096
+  device: cuda:0
+  headless: true

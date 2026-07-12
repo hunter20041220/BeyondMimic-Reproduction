@@ -1,0 +1,27 @@
+schema_version: stage3-diffusion-config-v1
+frequency_hz: 50.0
+dt: 0.02
+past_steps: 4
+include_current: true
+future_steps: 16
+sequence_length: 21
+future_physical_horizon_s: 0.32
+prediction_type: x0
+legacy_prediction_type_supported: epsilon
+model:
+  embedding_dim: 512
+  attention_heads: 8
+  transformer_layers: 6
+diffusion:
+  denoising_steps: 20
+  per_token_steps: true
+training:
+  effective_batch_size: 512
+  per_device_batch_size: 128
+  gradient_accumulation_steps: 4
+  learning_rate: 0.0001
+  weight_decay: 0.001
+  mixed_precision: bf16
+ema:
+  power: 0.75
+  max: 0.9999

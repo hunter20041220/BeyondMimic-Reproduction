@@ -1,0 +1,12 @@
+schema_version: stage3-guidance-config-v1
+objectives:
+  joystick:
+    weight: 1.0
+    target_velocity_xy: [0.6, 0.0]
+    per_horizon_weighting: uniform
+  waypoint:
+    weight: 0.0
+gradient:
+  guidance_scale: 1.0
+  clip_norm: 1.0
+normalization: dataset_state_latent_stats

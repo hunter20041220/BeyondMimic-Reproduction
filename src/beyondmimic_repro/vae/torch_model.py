@@ -1,4 +1,8 @@
-"""Small conditional action VAE used by the release training script."""
+"""Legacy/smoke conditional action VAE.
+
+This model encodes state-action pairs. It is retained as a simplified baseline
+and must not be described as the paper-faithful Stage-2 DAgger VAE.
+"""
 
 from __future__ import annotations
 
@@ -10,7 +14,7 @@ except ImportError as exc:  # pragma: no cover
 
 
 class ConditionalActionVAE(nn.Module):
-    """Encode state-action pairs and decode actions conditioned on state."""
+    """Legacy state-action VAE baseline."""
 
     def __init__(self, state_dim: int, action_dim: int, latent_dim: int = 32, hidden_dim: int = 256) -> None:
         super().__init__()
@@ -54,3 +58,6 @@ def vae_loss(recon: torch.Tensor, target: torch.Tensor, mu: torch.Tensor, logvar
     recon_loss = torch.mean((recon - target) ** 2)
     kl = -0.5 * torch.mean(1.0 + logvar - mu.pow(2) - logvar.exp())
     return recon_loss + beta * kl
+
+
+LegacyConditionalActionVAE = ConditionalActionVAE

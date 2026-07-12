@@ -1,0 +1,16 @@
+schema_version: stage3-state-representation-v1
+representation: character-yaw-centric
+root_features:
+  - root relative position in current character-yaw frame
+  - root relative orientation Rot6D in current character-yaw frame
+  - root relative linear velocity in current character-yaw frame
+  - root relative angular velocity in current character-yaw frame
+body_features:
+  frame: each timestep local root/yaw frame
+  include: [body_position, body_linear_velocity]
+quaternion_format: explicit_per_dataset
+rot6d_convention: first_two_rotation_matrix_columns
+projection:
+  seed: 7
+  coefficient: 6
+  gaussian_rows: 64

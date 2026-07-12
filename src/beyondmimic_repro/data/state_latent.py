@@ -1,8 +1,9 @@
-"""State-latent dataset construction."""
+"""Legacy teacher-rollout state-latent dataset construction."""
 
 from __future__ import annotations
 
 from pathlib import Path
+import warnings
 
 import numpy as np
 
@@ -36,7 +37,15 @@ def build_state_latent_dataset(
     *,
     latent_dim: int = 32,
 ) -> dict[str, object]:
-    """Build `tokens=[state, latent]` windows from teacher rollout actions."""
+    """Build `tokens=[state, latent]` windows from teacher rollout actions.
+
+    Legacy approximation only. Paper-faithful Stage-3 data must use
+    ``stage3.datasets.state_latent_builder.build_from_vae_rollout``.
+    """
+    warnings.warn(
+        "Legacy path: direct teacher-rollout encoding is not the paper-faithful Stage-3 dataset path.",
+        stacklevel=2,
+    )
     states, actions, names = load_teacher_rollout(rollout_path)
     latents, action_mean, components = encode_actions_linear(actions, latent_dim=latent_dim)
     tokens = np.concatenate([states, latents], axis=-1).astype(np.float32)
