@@ -6,9 +6,9 @@ Branch: `stage2-stage3-complete-h20`
 
 Base commit: `e4f6a41`
 
-Final commit: filled after commit.
+Code release commit: `d7cdf6d`
 
-Push status: pending.
+Push status: pushed to `origin/stage2-stage3-complete-h20`.
 
 Source files discovered by full find: `93072`
 

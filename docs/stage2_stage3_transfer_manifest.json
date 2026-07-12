@@ -10,7 +10,7 @@
     "Isaac/Omni caches",
     "credentials"
   ],
-  "final_commit": "pending_until_commit; see final report and git log",
+  "final_commit": "code_release_commit=d7cdf6d; latest_branch_commit=see git log",
   "full_find_file_count": 93072,
   "generated_at": "2026-07-12T12:34:38.117549+00:00",
   "implemented_modules": [

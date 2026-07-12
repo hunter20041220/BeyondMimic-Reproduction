@@ -2,7 +2,7 @@
 
 - **release_branch**: stage2-stage3-complete-h20
 - **base_commit**: e4f6a41
-- **final_commit**: pending_until_commit; see final report and git log
+- **final_commit**: code_release_commit=d7cdf6d; latest_branch_commit=see git log
 - **full_find_file_count**: 93072
 - **source_inventory_count**: 3726
 - **copied_file_count**: 2975
