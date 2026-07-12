@@ -14,7 +14,9 @@ from beyondmimic_repro.contracts.dagger_dataset import load_dagger_dataset, merg
 from beyondmimic_repro.contracts.state_latent import load_state_latent_dataset
 from beyondmimic_repro.contracts.teacher_assets import load_teacher_map, validate_teacher_assets
 from beyondmimic_repro.stage2.datasets.teacher_d0 import BC_WARMSTART_NOTICE
+from beyondmimic_repro.stage2.training_runtime import train_vae_bc_warmstart_runtime, train_vae_dagger_runtime
 from beyondmimic_repro.stage3.datasets.state_latent_builder import build_from_vae_rollout
+from beyondmimic_repro.stage3.diffusion.training_runtime import train_state_latent_diffusion_runtime
 
 
 def write_json(path: str | Path, payload: dict[str, Any]) -> None:
@@ -67,18 +69,46 @@ def main_train_vae_bc_warmstart(argv: list[str] | None = None) -> int:
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--batch-size", type=int)
     parser.add_argument("--epochs", type=int)
+    parser.add_argument("--max-samples", type=int, help="Optional cap for smoke tests or memory-limited runs.")
     parser.add_argument("--dry-run", action="store_true")
     add_output_seed(parser)
     args = parser.parse_args(argv)
     ensure_file(args.teacher_rollout, "--teacher-rollout")
     print(BC_WARMSTART_NOTICE)
+    if args.dry_run:
+        payload = {
+            "status": "dry_run_ok",
+            "notice": BC_WARMSTART_NOTICE,
+            "teacher_rollout": args.teacher_rollout,
+            "config": args.config,
+            "device": args.device,
+            "seed": args.seed,
+        }
+        write_json(Path(args.output_dir) / "vae_bc_warmstart_summary.json", payload)
+        print(json.dumps(payload, sort_keys=True))
+        return 0
+    summary = train_vae_bc_warmstart_runtime(
+        teacher_rollout=args.teacher_rollout,
+        config_path=args.config,
+        output_dir=args.output_dir,
+        device=args.device,
+        seed=args.seed,
+        resume_checkpoint=args.resume_checkpoint,
+        batch_size=args.batch_size,
+        epochs=args.epochs,
+        max_samples=args.max_samples,
+    )
     payload = {
-        "status": "dry_run_ok" if args.dry_run else "ready_requires_training_runtime",
+        "status": summary["status"],
         "notice": BC_WARMSTART_NOTICE,
         "teacher_rollout": args.teacher_rollout,
         "config": args.config,
         "device": args.device,
         "seed": args.seed,
+        "latest_checkpoint": summary["latest_checkpoint"],
+        "best_checkpoint": summary["best_checkpoint"],
+        "best_validation_loss": summary["best_validation_loss"],
+        "summary_path": str(Path(args.output_dir) / "summary.json"),
     }
     write_json(Path(args.output_dir) / "vae_bc_warmstart_summary.json", payload)
     print(json.dumps(payload, sort_keys=True))
@@ -91,17 +121,45 @@ def main_train_vae_dagger(argv: list[str] | None = None) -> int:
     parser.add_argument("--vae-checkpoint", required=True)
     parser.add_argument("--config", default="configs/stage2/dagger_walk1_50hz.yaml")
     parser.add_argument("--device", default="cpu")
+    parser.add_argument("--batch-size", type=int)
+    parser.add_argument("--epochs", type=int)
+    parser.add_argument("--max-samples", type=int, help="Optional cap for smoke tests or memory-limited runs.")
     parser.add_argument("--dry-run", action="store_true")
     add_output_seed(parser)
     args = parser.parse_args(argv)
     ensure_file(args.dagger_dataset, "--dagger-dataset")
     ensure_file(args.vae_checkpoint, "--vae-checkpoint")
     payload, metadata = load_dagger_dataset(args.dagger_dataset)
+    if args.dry_run:
+        summary = {
+            "status": "dry_run_ok",
+            "schema_version": metadata.schema_version,
+            "sample_count": int(next(iter(payload.values())).shape[0]),
+            "vae_checkpoint": args.vae_checkpoint,
+            "seed": args.seed,
+        }
+        write_json(Path(args.output_dir) / "vae_dagger_summary.json", summary)
+        print(json.dumps(summary, sort_keys=True))
+        return 0
+    trained = train_vae_dagger_runtime(
+        dagger_dataset=args.dagger_dataset,
+        vae_checkpoint=args.vae_checkpoint,
+        config_path=args.config,
+        output_dir=args.output_dir,
+        device=args.device,
+        seed=args.seed,
+        batch_size=args.batch_size,
+        epochs=args.epochs,
+        max_samples=args.max_samples,
+    )
     summary = {
-        "status": "dry_run_ok" if args.dry_run else "ready_requires_training_runtime",
+        "status": trained["status"],
         "schema_version": metadata.schema_version,
         "sample_count": int(next(iter(payload.values())).shape[0]),
         "vae_checkpoint": args.vae_checkpoint,
+        "latest_checkpoint": trained["latest_checkpoint"],
+        "best_checkpoint": trained["best_checkpoint"],
+        "best_validation_loss": trained["best_validation_loss"],
         "seed": args.seed,
     }
     write_json(Path(args.output_dir) / "vae_dagger_summary.json", summary)
@@ -170,12 +228,39 @@ def main_diffusion_train(argv: list[str] | None = None) -> int:
     parser.add_argument("--prediction-type", choices=["x0", "epsilon"], default="x0")
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--resume-checkpoint")
+    parser.add_argument("--batch-size", type=int)
+    parser.add_argument("--epochs", type=int)
+    parser.add_argument("--max-samples", type=int, help="Optional cap for smoke tests or memory-limited runs.")
     parser.add_argument("--dry-run", action="store_true")
     add_output_seed(parser)
     args = parser.parse_args(argv)
     ensure_file(args.state_latent_dataset, "--state-latent-dataset")
     load_state_latent_dataset(args.state_latent_dataset)
-    summary = {"status": "dry_run_ok" if args.dry_run else "ready_requires_training_runtime", "prediction_type": args.prediction_type}
+    if args.dry_run:
+        summary = {"status": "dry_run_ok", "prediction_type": args.prediction_type}
+        write_json(Path(args.output_dir) / "diffusion_train_summary.json", summary)
+        print(json.dumps(summary, sort_keys=True))
+        return 0
+    trained = train_state_latent_diffusion_runtime(
+        dataset_path=args.state_latent_dataset,
+        config_path=args.config,
+        output_dir=args.output_dir,
+        prediction_type=args.prediction_type,
+        device=args.device,
+        seed=args.seed,
+        resume_checkpoint=args.resume_checkpoint,
+        batch_size=args.batch_size,
+        epochs=args.epochs,
+        max_samples=args.max_samples,
+    )
+    summary = {
+        "status": trained["status"],
+        "prediction_type": args.prediction_type,
+        "latest_checkpoint": trained["latest_checkpoint"],
+        "best_checkpoint": trained["best_checkpoint"],
+        "best_validation_loss": trained["best_validation_loss"],
+        "summary_path": str(Path(args.output_dir) / "summary.json"),
+    }
     write_json(Path(args.output_dir) / "diffusion_train_summary.json", summary)
     print(json.dumps(summary, sort_keys=True))
     return 0

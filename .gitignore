@@ -39,6 +39,7 @@ outputs/videos/*
 outputs/figures/*
 outputs/metrics/*
 outputs/logs/*
+configs/local/
 
 # Keep documented directory placeholders
 !data/**/.gitkeep
