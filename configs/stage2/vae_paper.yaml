@@ -1,0 +1,21 @@
+schema_version: stage2-vae-config-v1
+model:
+  encoder_input_dim: 67
+  decoder_proprio_dim: 96
+  latent_dim: 32
+  action_dim: 29
+  encoder_hidden_dims: [2048, 1024, 512]
+  decoder_hidden_dims: [2048, 1024, 512]
+  activation: ELU
+training:
+  learning_rate: 0.0005
+  kl_coefficient: 0.01
+  gradient_accumulation_steps: 15
+  mixed_precision: fp32
+data:
+  joint_position_semantics: relative_to_default
+  encoder_reference_input: reference joint pos/vel + anchor error + anchor Rot6D
+  decoder_proprio_input: projected gravity + root twist + current joints + previous action
+truthfulness:
+  h20_status: offline code only
+  isaac_closed_loop: not validated on H20; requires RTX 4090 + Isaac Sim runtime

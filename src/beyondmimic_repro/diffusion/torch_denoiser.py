@@ -1,4 +1,4 @@
-"""Transformer denoiser for state-latent trajectory tokens."""
+"""Legacy epsilon-prediction transformer denoiser for smoke tests."""
 
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ class SinusoidalTimeEmbedding(nn.Module):
 
 
 class StateLatentTransformerDenoiser(nn.Module):
-    """Predict DDPM noise for `[batch, horizon, token_dim]` trajectories."""
+    """Legacy epsilon-prediction baseline; Stage-3 defaults to x0 prediction."""
 
     def __init__(
         self,
@@ -60,3 +60,6 @@ class StateLatentTransformerDenoiser(nn.Module):
         hidden = self.input(noisy_tokens)
         hidden = hidden + self.time(timesteps)[:, None, :]
         return self.output(self.transformer(hidden))
+
+
+LegacyEpsilonDenoiser = StateLatentTransformerDenoiser

@@ -91,6 +91,44 @@ python scripts/03_teacher_rollout/collect_teacher_rollout.py \
 
 ## Training
 
+## Stage-2/Stage-3 H20 Release Branch
+
+This branch adds the organized Stage-2/3 release surface for RTX 4090 transfer:
+
+```text
+contracts/
+stage2/       paper VAE, DAgger, OU rollout, VAE frontend
+stage3/       character-frame state, state-latent, x0 diffusion, guidance
+adapters/     Isaac import boundary and MuJoCo/controller contracts
+legacy/       smoke/simplified baselines kept for comparison
+```
+
+Important truthfulness boundary:
+
+```text
+not validated on H20
+requires RTX 4090 + Isaac Sim runtime
+```
+
+applies to DAgger closed-loop, VAE closed-loop, VAE rollout collection, and guided diffusion closed-loop.
+
+Start with:
+
+```bash
+python scripts/03_teacher_rollout/audit_teacher_assets.py --help
+python scripts/04_vae/train_vae_bc_warmstart.py --help
+python scripts/05_state_latent/build_from_vae_rollout.py --help
+python scripts/06_diffusion/train_state_latent_diffusion.py --help
+python scripts/09_isaac/collect_dagger_round.py --help
+```
+
+See:
+
+- `docs/stage2_stage3_status.md`
+- `docs/data_contracts_stage2_stage3.md`
+- `docs/transfer_to_4090.md`
+- `docs/paper_alignment_matrix.md`
+
 Conditional action VAE:
 
 ```bash

@@ -1,0 +1,12 @@
+schema_version: stage3-guidance-config-v1
+objectives:
+  inpainting:
+    weight: 1.0
+    mask_source: keyframe/body/user
+gradient:
+  guidance_scale: 1.0
+  clip_norm: 1.0
+supports:
+  history_inpainting: true
+  current_state_conditioning: true
+  future_keyframe_inpainting: true

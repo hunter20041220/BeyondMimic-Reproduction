@@ -1,0 +1,18 @@
+schema_version: stage2-vae-rollout-config-v1
+frequency_hz: 50.0
+dt: 0.02
+ou_noise:
+  theta: 0.8
+  mu: 0.0
+  sigma: 0.1
+  seed: 20260712
+acceptance:
+  perturbation_duration_s: 2.5
+  validation_duration_s: 5.0
+record:
+  clean_action: true
+  ou_noise: true
+  executed_action: true
+  accepted: true
+  rejection_reason: true
+  survival_time: true

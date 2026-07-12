@@ -13,8 +13,21 @@ envs/
 cache/
 tmp/
 .env
+.netrc
+*.key
+*.pem
 
 # Large experiment artifacts
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.npz
+*.mp4
+*.avi
+*.mkv
+events.out.tfevents*
+wandb/
 data/raw/*
 data/processed/*
 data/teacher_rollouts/*
