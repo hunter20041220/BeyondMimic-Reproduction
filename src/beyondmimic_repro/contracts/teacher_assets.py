@@ -54,10 +54,12 @@ def _first(record: dict[str, Any], *keys: str, default: Any = "") -> Any:
 
 
 def _relocate(path_value: Any, *, root: Path | None) -> Path:
-    path = Path(str(path_value or ""))
     if not path_value:
         return Path("")
-    if root is not None and path.is_absolute():
+    raw_path = str(path_value)
+    path = Path(raw_path)
+    source_absolute = path.is_absolute() or raw_path.startswith(("/", "\\"))
+    if root is not None and source_absolute:
         return root / path.name
     if root is not None and not path.is_absolute():
         return root / path
@@ -101,7 +103,7 @@ def load_teacher_map(
     data_root: str | Path | None = None,
     checkpoint_root: str | Path | None = None,
 ) -> dict[str, TeacherAssets]:
-    """Load a teacher map without requiring source-machine absolute paths."""
+    """Load a teacher map without requiring source-specific absolute paths."""
     payload = json.loads(Path(teacher_map).read_text(encoding="utf-8"))
     if isinstance(payload, dict) and "teachers" in payload:
         raw_records = payload["teachers"]

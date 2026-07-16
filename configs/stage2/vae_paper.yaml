@@ -16,6 +16,6 @@ data:
   joint_position_semantics: relative_to_default
   encoder_reference_input: reference joint pos/vel + anchor error + anchor Rot6D
   decoder_proprio_input: projected gravity + root twist + current joints + previous action
-truthfulness:
-  h20_status: offline code only
-  isaac_closed_loop: not validated on H20; requires RTX 4090 + Isaac Sim runtime
+validation:
+  offline_status: code and data contracts available
+  isaac_closed_loop: requires Isaac Sim / Isaac Lab runtime validation

@@ -12,7 +12,7 @@ def run_collect_dagger_round(config: IsaacRunConfig) -> dict[str, object]:
     """Launch Isaac, then hand control to the runtime-specific collection code."""
     app = launch_isaac_app(config)
     try:
-        # Isaac task imports must happen here on the 4090 host after AppLauncher.
+        # Isaac task imports must happen here after AppLauncher initializes the runtime.
         __import__("whole_body_tracking")
     finally:
         if hasattr(app, "close"):
@@ -20,5 +20,5 @@ def run_collect_dagger_round(config: IsaacRunConfig) -> dict[str, object]:
     return {
         "status": "isaac_runtime_entrypoint_ready",
         "task_name": config.task_name,
-        "validation": "not validated on H20; requires RTX 4090 + Isaac Sim runtime",
+        "validation": "requires Isaac Sim / Isaac Lab runtime validation",
     }

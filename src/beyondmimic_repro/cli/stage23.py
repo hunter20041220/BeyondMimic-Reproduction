@@ -282,7 +282,7 @@ def main_isaac_entry(argv: list[str] | None = None, *, entrypoint: str) -> int:
     summary = {
         "status": "isaac_runtime_available",
         "entrypoint": entrypoint,
-        "validation": "not validated on H20; requires RTX 4090 + Isaac Sim runtime",
+        "validation": "requires Isaac Sim / Isaac Lab runtime validation",
     }
     write_json(Path(args.output_dir) / f"{entrypoint}_summary.json", summary)
     print(json.dumps(summary, sort_keys=True))

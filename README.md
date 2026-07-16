@@ -1,22 +1,28 @@
 # BeyondMimic-Reproduction
 
-Clean public-resource reproduction code for a BeyondMimic-style pipeline:
+This repository provides a clean, research-oriented reproduction codebase for a
+BeyondMimic-style whole-body motion pipeline. It is an independent reproduction
+surface, not the official BeyondMimic implementation.
 
 ```text
-motion tracking policy rollout dataset
-  -> DAgger-style VAE encoder / decoder
-  -> state-latent trajectories
+motion data
+  -> teacher rollout contracts
+  -> conditional action VAE
+  -> state-latent trajectory windows
   -> Transformer diffusion denoiser
   -> test-time guidance
-  -> joystick / waypoint / obstacle avoidance / inpainting
 ```
 
-This is a cleaned release repository, not the official BeyondMimic codebase.
-The original development/audit repository keeps the full commit history and
-progress logs; this repository keeps the runnable research-code surface.
+## Highlights
 
-Development history and audit trail:
-[hunter20041220/BeyondMimic](https://github.com/hunter20041220/BeyondMimic).
+- Dependency-light smoke pipeline for data contracts, VAE inputs, diffusion
+  shapes, and guidance costs.
+- Modular implementation under `src/beyondmimic_repro` with stage-specific
+  command-line entrypoints under `scripts`.
+- Configured experiments for tracking data preparation, VAE training,
+  state-latent diffusion, and guidance tasks.
+- Optional Isaac Sim / Isaac Lab entrypoints are isolated behind runtime import
+  boundaries so the package can be imported and tested without a simulator.
 
 ## Installation
 
@@ -28,16 +34,20 @@ source .venv/bin/activate
 pip install -e ".[analysis,dev]"
 ```
 
-For VAE and diffusion training:
+Install PyTorch separately for VAE or diffusion training:
 
 ```bash
 pip install -r requirements/torch.txt
 pip install -e .
 ```
 
-## Quick Smoke Pipeline
+Install simulator-specific dependencies only in an environment where Isaac Sim,
+Isaac Lab, and the required task package are available.
 
-This path needs no external dataset or simulator:
+## Quick Start
+
+The following smoke pipeline uses synthetic data and does not require external
+datasets, checkpoints, or a simulator:
 
 ```bash
 python scripts/00_setup/check_environment.py
@@ -56,7 +66,7 @@ python scripts/08_visualization/summarize_outputs.py
 pytest
 ```
 
-## Public Motion Data
+## Data
 
 Place retargeted LAFAN1 G1 CSV files under:
 
@@ -64,7 +74,7 @@ Place retargeted LAFAN1 G1 CSV files under:
 data/raw/lafan1/
 ```
 
-Expected row layout:
+Each row is expected to contain:
 
 ```text
 root position xyz       3
@@ -73,65 +83,20 @@ G1 action / joints     29
 total                  36
 ```
 
-Prepare:
+Prepare the dataset and build teacher rollout windows:
 
 ```bash
 python scripts/01_data/prepare_lafan1.py \
   --input data/raw/lafan1 \
   --output data/processed/lafan1_g1.npz
-```
-
-Then build rollout windows:
-
-```bash
 python scripts/03_teacher_rollout/collect_teacher_rollout.py \
   --input data/processed/lafan1_g1.npz \
   --output data/teacher_rollouts/teacher_rollout_train.npz
 ```
 
-## Training
+## Training And Evaluation
 
-## Stage-2/Stage-3 H20 Release Branch
-
-This branch adds the organized Stage-2/3 release surface for RTX 4090 transfer:
-
-```text
-contracts/
-stage2/       paper VAE, DAgger, OU rollout, VAE frontend
-stage3/       character-frame state, state-latent, x0 diffusion, guidance
-adapters/     Isaac import boundary and MuJoCo/controller contracts
-legacy/       smoke/simplified baselines kept for comparison
-```
-
-Important truthfulness boundary:
-
-```text
-not validated on H20
-requires RTX 4090 + Isaac Sim runtime
-```
-
-applies to DAgger closed-loop, VAE closed-loop, VAE rollout collection, and guided diffusion closed-loop.
-
-Start with:
-
-```bash
-python scripts/03_teacher_rollout/audit_teacher_assets.py --help
-python scripts/04_vae/train_vae_bc_warmstart.py --help
-python scripts/05_state_latent/build_from_vae_rollout.py --help
-python scripts/06_diffusion/train_state_latent_diffusion.py --help
-python scripts/09_isaac/collect_dagger_round.py --help
-```
-
-See:
-
-- `docs/rtx4090_handoff_guide.md`
-- `docs/rtx4090_handoff_guide_zh.md`
-- `docs/stage2_stage3_status.md`
-- `docs/data_contracts_stage2_stage3.md`
-- `docs/transfer_to_4090.md`
-- `docs/paper_alignment_matrix.md`
-
-Conditional action VAE:
+Train a conditional action VAE:
 
 ```bash
 python scripts/04_vae/train_vae.py \
@@ -139,7 +104,7 @@ python scripts/04_vae/train_vae.py \
   --output checkpoints/vae/vae_latest.pt
 ```
 
-State-latent windows:
+Build state-latent windows:
 
 ```bash
 python scripts/05_state_latent/build_state_latent_dataset.py \
@@ -147,7 +112,7 @@ python scripts/05_state_latent/build_state_latent_dataset.py \
   --output data/state_latent/train_windows.npz
 ```
 
-Transformer diffusion denoiser:
+Train the Transformer diffusion denoiser:
 
 ```bash
 python scripts/06_diffusion/train_denoiser.py \
@@ -155,27 +120,31 @@ python scripts/06_diffusion/train_denoiser.py \
   --output checkpoints/diffusion/denoiser_latest.pt
 ```
 
-Guidance metrics:
+Evaluate offline guidance costs:
 
 ```bash
 python scripts/07_guidance/eval_guidance.py \
   --dataset data/state_latent/train_windows.npz
 ```
 
+Isaac-based closed-loop commands are available under `scripts/09_isaac`. These
+entrypoints require a working Isaac Sim / Isaac Lab installation and the
+corresponding whole-body tracking task.
+
 ## Repository Layout
 
 ```text
-configs/      experiment defaults
-scripts/      command-line entrypoints by pipeline stage
-src/          importable implementation
-data/         local datasets, ignored by git
-checkpoints/  local weights, ignored by git
-outputs/      metrics, logs, figures, videos, ignored by git
-docs/         method, data format, environment, claims
-tests/        dependency-light regression tests
+configs/       experiment defaults
+scripts/       command-line entrypoints by pipeline stage
+src/           importable implementation
+tests/         regression tests
+requirements/  optional dependency groups
+data/          local datasets, ignored by git
+checkpoints/   local weights, ignored by git
+outputs/       metrics, logs, figures, and videos, ignored by git
 ```
 
-The stage numbering follows the reproduction chain:
+The stage numbering follows the reproduction pipeline:
 
 ```text
 00 setup checks
@@ -184,17 +153,22 @@ The stage numbering follows the reproduction chain:
 03 teacher rollout collection
 04 conditional action VAE
 05 state-latent trajectory construction
-06 transformer diffusion denoiser
+06 Transformer diffusion denoiser
 07 test-time guidance
-08 output summaries / visualization hooks
+08 output summaries and visualization hooks
+09 optional Isaac runtime entrypoints
 ```
 
 ## Scope
 
-Included: schema utilities, public motion preparation, teacher-rollout dataset
-format, conditional action VAE, transformer denoiser, state-latent dataset
-builder, and trajectory-level guidance costs.
+Included: schema utilities, motion data preparation, teacher-rollout dataset
+format, conditional action VAE, state-latent dataset builder, Transformer
+denoiser, and trajectory-level guidance costs.
 
-Not included: official BeyondMimic checkpoints, unreleased DAgger logs,
-real-robot deployment, or paper-level official metric claims. See
-`docs/reproduction_claims.md`.
+Not included: official BeyondMimic checkpoints, private training logs,
+real-robot deployment code, or official benchmark claims.
+
+## Citation
+
+If this repository is useful for your research, please cite the BeyondMimic
+paper and this reproduction repository.
