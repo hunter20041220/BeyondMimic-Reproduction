@@ -19,7 +19,7 @@ class VAERolloutMetadata:
     schema_version: str = VAE_ROLLOUT_SCHEMA_VERSION
     frequency_hz: float = 50.0
     source: str = "trained VAE student closed-loop rollout"
-    isaac_validation_status: str = "not validated on H20; requires RTX 4090 + Isaac Sim runtime"
+    isaac_validation_status: str = "requires Isaac Sim / Isaac Lab runtime validation"
 
 
 def validate_vae_rollout(payload: dict[str, np.ndarray]) -> dict[str, np.ndarray]:

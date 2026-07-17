@@ -14,7 +14,7 @@ def load_isaac_teacher_assets(
     checkpoint_root: str | Path | None = None,
     require_files: bool = True,
 ) -> dict[str, TeacherAssets]:
-    """Load and validate assets after path relocation on the 4090 host."""
+    """Load and validate assets after path relocation."""
     assets = load_teacher_map(teacher_map, data_root=data_root, checkpoint_root=checkpoint_root)
     errors = validate_teacher_assets(assets, require_files=require_files)
     if errors:
