@@ -45,9 +45,6 @@ configs/local/
 !data/**/.gitkeep
 !checkpoints/**/.gitkeep
 !outputs/**/.gitkeep
-!data/README.md
-!checkpoints/README.md
-!outputs/README.md
 
 # OS/editor
 .DS_Store
