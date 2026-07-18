@@ -32,6 +32,8 @@ class TeacherAssets:
         data = asdict(self)
         for key in ["checkpoint_path", "onnx_path", "teacher_rollout_path", "motion_file"]:
             data[key] = str(data[key])
+        if data["onnx_path"] == ".":
+            data["onnx_path"] = ""
         data["joint_names"] = list(self.joint_names)
         data["body_names"] = list(self.body_names)
         return data
@@ -155,13 +157,16 @@ def validate_teacher_assets(
             validate_frequency(asset, expected_hz=expected_hz)
             validate_motion_mapping(asset, require_joints=False)
             if require_files:
-                for attr in ["checkpoint_path", "onnx_path", "teacher_rollout_path", "motion_file"]:
+                for attr in ["checkpoint_path", "teacher_rollout_path", "motion_file"]:
                     path = getattr(asset, attr)
-                    if path and not Path(path).is_file():
+                    if not Path(path).is_file():
                         raise FileNotFoundError(f"{asset.motion_name}: missing {attr}: {path}")
+                onnx_path = Path(asset.onnx_path)
+                if str(onnx_path) not in ("", ".") and not onnx_path.is_file():
+                    raise FileNotFoundError(f"{asset.motion_name}: missing onnx_path: {onnx_path}")
                 if asset.checkpoint_sha256 and sha256_file(asset.checkpoint_path) != asset.checkpoint_sha256:
                     raise ValueError(f"{asset.motion_name}: checkpoint SHA256 mismatch")
-                if asset.onnx_sha256 and asset.onnx_path and sha256_file(asset.onnx_path) != asset.onnx_sha256:
+                if asset.onnx_sha256 and str(onnx_path) not in ("", ".") and sha256_file(onnx_path) != asset.onnx_sha256:
                     raise ValueError(f"{asset.motion_name}: ONNX SHA256 mismatch")
                 if asset.motion_sha256 and asset.motion_file and sha256_file(asset.motion_file) != asset.motion_sha256:
                     raise ValueError(f"{asset.motion_name}: motion SHA256 mismatch")

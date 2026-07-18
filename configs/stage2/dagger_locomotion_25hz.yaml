@@ -1,0 +1,15 @@
+schema_version: stage2-dagger-config-v1
+motion_set: lafan1_locomotion
+task_name: Tracking-Flat-G1-Low-Freq-v0
+frequency_hz: 25.0
+dt: 0.04
+teacher_map: null
+collection:
+  student_executes_action: true
+  teacher_action_is_supervision_only: true
+  num_envs: 8192
+  device: cuda:0
+  headless: true
+output:
+  tensorboard: true
+  wandb: false

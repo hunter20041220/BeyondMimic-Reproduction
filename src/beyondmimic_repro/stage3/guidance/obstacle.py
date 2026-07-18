@@ -18,8 +18,15 @@ def relaxed_barrier(distance: torch.Tensor, delta: float = 0.1) -> torch.Tensor:
 
 def obstacle_guidance_cost(predicted_trajectory: torch.Tensor, context: dict[str, torch.Tensor | float]) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
     """SDF + relaxed barrier over planar root path."""
-    xy = predicted_trajectory[..., :2]
-    center = torch.as_tensor(context["obstacle_xy"], dtype=xy.dtype, device=xy.device).view(1, 1, 2)
+    start_index = int(context.get("cost_start_index", 0))
+    position_slice = context.get("position_slice", (0, 2))
+    pos_start, pos_end = position_slice
+    xy = predicted_trajectory[:, start_index:, int(pos_start) : int(pos_end)]
+    center = torch.as_tensor(context["obstacle_xy"], dtype=xy.dtype, device=xy.device)
+    if center.ndim == 1:
+        center = center.view(1, 1, 2)
+    elif center.ndim == 2:
+        center = center[:, None, :]
     radius = float(context.get("radius", 0.2))
     delta = float(context.get("delta", 0.1))
     distance = torch.linalg.norm(xy - center, dim=-1) - radius

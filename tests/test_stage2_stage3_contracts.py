@@ -128,6 +128,140 @@ def test_state_latent_from_vae_rollout_shape(tmp_path) -> None:
     assert summary["window_count"] == 4
 
 
+def test_state_latent_from_vae_rollout_filters_done_windows(tmp_path) -> None:
+    rollout = tmp_path / "vae_rollout_done.npz"
+    done = np.zeros((2, 24), dtype=np.bool_)
+    done[0, 3] = True
+    accepted = np.ones((2, 24), dtype=np.bool_)
+    accepted[0, 4:] = False
+    save_vae_rollout(
+        rollout,
+        {
+            "actual_state": np.zeros((2, 24, 99), dtype=np.float32),
+            "latent": np.zeros((2, 24, 32), dtype=np.float32),
+            "clean_action": np.zeros((2, 24, 29), dtype=np.float32),
+            "executed_action": np.zeros((2, 24, 29), dtype=np.float32),
+            "accepted": accepted,
+            "done": done,
+            "episode_id": np.broadcast_to(np.arange(2, dtype=np.int32)[:, None], (2, 24)),
+            "time_index": np.broadcast_to(np.arange(24, dtype=np.int32)[None, :], (2, 24)),
+        },
+        VAERolloutMetadata(),
+    )
+    output = tmp_path / "state_latent_done.npz"
+    summary = build_from_vae_rollout(rollout, output, motion_id=7)
+    assert summary["window_count"] == 4
+    assert summary["discarded_window_count"] == 4
+    with np.load(output, allow_pickle=False) as data:
+        assert np.all(data["source_environment_id"] == 1)
+        assert np.all(data["motion_id"] == 7)
+        assert np.array_equal(data["time_index"], np.arange(4, dtype=np.int32))
+
+
+def test_state_latent_from_vae_rollout_can_reject_failed_episode_prefixes(tmp_path) -> None:
+    rollout = tmp_path / "vae_rollout_prefix_fail.npz"
+    accepted = np.ones((2, 24), dtype=np.bool_)
+    accepted[0, 22:] = False
+    save_vae_rollout(
+        rollout,
+        {
+            "actual_state": np.zeros((2, 24, 99), dtype=np.float32),
+            "latent": np.zeros((2, 24, 32), dtype=np.float32),
+            "clean_action": np.zeros((2, 24, 29), dtype=np.float32),
+            "executed_action": np.zeros((2, 24, 29), dtype=np.float32),
+            "accepted": accepted,
+            "episode_id": np.broadcast_to(np.arange(2, dtype=np.int32)[:, None], (2, 24)),
+            "time_index": np.broadcast_to(np.arange(24, dtype=np.int32)[None, :], (2, 24)),
+        },
+        VAERolloutMetadata(frequency_hz=50.0),
+    )
+
+    loose_summary = build_from_vae_rollout(rollout, tmp_path / "state_latent_prefix_loose.npz")
+    strict_output = tmp_path / "state_latent_prefix_strict.npz"
+    strict_summary = build_from_vae_rollout(
+        rollout,
+        strict_output,
+        require_full_episode_accepted=True,
+    )
+
+    assert loose_summary["window_count"] == 6
+    assert strict_summary["window_count"] == 4
+    assert strict_summary["accepted_episode_count"] == 1
+    assert strict_summary["rejected_episode_count"] == 1
+    with np.load(strict_output, allow_pickle=False) as data:
+        assert np.all(data["source_environment_id"] == 1)
+
+
+def test_state_latent_from_vae_rollout_can_downsample_to_25hz(tmp_path) -> None:
+    rollout = tmp_path / "vae_rollout_50hz.npz"
+    save_vae_rollout(
+        rollout,
+        {
+            "actual_state": np.zeros((1, 50, 99), dtype=np.float32),
+            "latent": np.zeros((1, 50, 32), dtype=np.float32),
+            "clean_action": np.zeros((1, 50, 29), dtype=np.float32),
+            "executed_action": np.zeros((1, 50, 29), dtype=np.float32),
+            "accepted": np.ones((1, 50), dtype=np.bool_),
+            "episode_id": np.zeros((1, 50), dtype=np.int32),
+            "time_index": np.arange(50, dtype=np.int32)[None, :],
+        },
+        VAERolloutMetadata(frequency_hz=50.0),
+    )
+    output = tmp_path / "state_latent_25hz.npz"
+    summary = build_from_vae_rollout(rollout, output, target_frequency_hz=25.0)
+    assert summary["source_stride"] == 2
+    assert summary["target_frequency_hz"] == 25.0
+    assert summary["window_count"] == 5
+    with np.load(output, allow_pickle=False) as data:
+        assert np.all(data["frequency_hz"] == 25.0)
+        assert np.array_equal(data["time_index"], np.array([0, 2, 4, 6, 8], dtype=np.int32))
+
+
+def test_state_latent_from_vae_rollout_builds_paper_projected_state(tmp_path) -> None:
+    rollout = tmp_path / "vae_rollout_paper_raw.npz"
+    steps = 24
+    root_pos = np.zeros((1, steps, 3), dtype=np.float32)
+    root_pos[0, :, 0] = np.linspace(0.0, 0.23, steps, dtype=np.float32)
+    root_quat = np.zeros((1, steps, 4), dtype=np.float32)
+    root_quat[..., 0] = 1.0
+    root_vel = np.zeros((1, steps, 3), dtype=np.float32)
+    root_vel[..., 0] = 0.5
+    body_pos = np.zeros((1, steps, 14, 3), dtype=np.float32)
+    body_pos[..., 0] = root_pos[:, :, None, 0]
+    body_vel = np.zeros((1, steps, 14, 3), dtype=np.float32)
+    save_vae_rollout(
+        rollout,
+        {
+            "actual_state": np.zeros((1, steps, 79), dtype=np.float32),
+            "root_pos_w": root_pos,
+            "root_quat_w": root_quat,
+            "root_lin_vel_w": root_vel,
+            "root_ang_vel_w": np.zeros_like(root_vel),
+            "body_pos_w": body_pos,
+            "body_lin_vel_w": body_vel,
+            "latent": np.zeros((1, steps, 32), dtype=np.float32),
+            "clean_action": np.zeros((1, steps, 29), dtype=np.float32),
+            "executed_action": np.zeros((1, steps, 29), dtype=np.float32),
+            "accepted": np.ones((1, steps), dtype=np.bool_),
+            "episode_id": np.zeros((1, steps), dtype=np.int32),
+            "time_index": np.arange(steps, dtype=np.int32)[None, :],
+        },
+        VAERolloutMetadata(),
+    )
+    hybrid_summary = build_from_vae_rollout(rollout, tmp_path / "state_latent_hybrid.npz", state_representation="paper_hybrid")
+    projected_summary = build_from_vae_rollout(
+        rollout,
+        tmp_path / "state_latent_projected.npz",
+        state_representation="paper_projected",
+    )
+    assert hybrid_summary["state_dim"] == 99
+    assert projected_summary["state_dim"] == 163
+    with np.load(tmp_path / "state_latent_projected.npz", allow_pickle=False) as data:
+        assert data["states"].shape[-1] == 163
+        assert data["state_projection_matrix"].shape == (163, 99)
+        assert data["state_projection_inverse"].shape == (99, 163)
+
+
 def test_controller_normalized_action_contract() -> None:
     meta = JointControllerMetadata(
         joint_names=tuple(f"j{i}" for i in range(29)),

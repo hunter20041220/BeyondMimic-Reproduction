@@ -1,0 +1,41 @@
+schema_version: stage3-diffusion-config-v1
+frequency_hz: 50.0
+dt: 0.02
+past_steps: 4
+include_current: true
+future_steps: 32
+sequence_length: 37
+history_physical_duration_s: 0.08
+future_physical_horizon_s: 0.64
+prediction_type: x0
+model:
+  embedding_dim: 512
+  attention_heads: 8
+  transformer_layers: 6
+  dropout: 0.0
+diffusion:
+  denoising_steps: 20
+  per_token_steps: true
+normalization:
+  enabled: false
+loss:
+  reduction: token_mean
+training:
+  epochs: 1000
+  effective_batch_size: 512
+  per_device_batch_size: 128
+  gradient_accumulation_steps: 4
+  learning_rate: 0.0001
+  weight_decay: 0.001
+  scheduler: cosine
+  warmup_steps: 10000
+  mixed_precision: bf16
+  max_grad_norm: 1.0
+  use_sample_weight: true
+  early_stopping:
+    enabled: false
+checkpoint:
+  milestone_epochs: [250, 500, 750, 1000]
+ema:
+  power: 0.75
+  max: 0.9999
