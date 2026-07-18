@@ -4,18 +4,26 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
+import traceback
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
-from beyondmimic_repro.adapters.isaac.contracts import ISAAC_UNAVAILABLE_MESSAGE, IsaacRunConfig, require_isaac_app_launcher
+from beyondmimic_repro.adapters.isaac.contracts import (
+    ISAAC_UNAVAILABLE_MESSAGE,
+    IsaacRunConfig,
+    launch_isaac_app,
+    require_isaac_app_launcher,
+)
 from beyondmimic_repro.contracts.dagger_dataset import load_dagger_dataset, merge_dagger_rounds
-from beyondmimic_repro.contracts.state_latent import load_state_latent_dataset
+from beyondmimic_repro.contracts.state_latent import StateLatentMetadata, load_state_latent_dataset
 from beyondmimic_repro.contracts.teacher_assets import load_teacher_map, validate_teacher_assets
 from beyondmimic_repro.stage2.datasets.teacher_d0 import BC_WARMSTART_NOTICE
 from beyondmimic_repro.stage2.training_runtime import train_vae_bc_warmstart_runtime, train_vae_dagger_runtime
-from beyondmimic_repro.stage3.datasets.state_latent_builder import build_from_vae_rollout
+from beyondmimic_repro.stage3.datasets.state_latent_builder import build_from_vae_rollout, merge_state_latent_datasets
 from beyondmimic_repro.stage3.diffusion.training_runtime import train_state_latent_diffusion_runtime
 
 
@@ -199,10 +207,50 @@ def main_build_from_vae_rollout(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build Stage-3 state-latent windows from VAE rollout.")
     parser.add_argument("--vae-rollout", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--motion-id", type=int, default=0)
+    parser.add_argument("--target-frequency-hz", type=float)
+    parser.add_argument(
+        "--state-representation",
+        choices=["actual_state", "paper_hybrid", "paper_projected"],
+        default="actual_state",
+    )
+    parser.add_argument("--projection-seed", type=int, default=7)
+    parser.add_argument("--acceptance-key", default="accepted")
+    parser.add_argument("--require-full-episode-accepted", action="store_true")
+    parser.add_argument("--episode-acceptance-seconds", type=float)
+    parser.add_argument("--past-steps", type=int, default=4)
+    parser.add_argument("--future-steps", type=int, default=16)
+    parser.add_argument("--no-current", dest="include_current", action="store_false", default=True)
+    parser.add_argument("--uncompressed", action="store_true", help="Write an uncompressed NPZ for faster training-time loading.")
     add_output_seed(parser)
     args = parser.parse_args(argv)
     ensure_file(args.vae_rollout, "--vae-rollout")
-    summary = build_from_vae_rollout(args.vae_rollout, args.output)
+    metadata = None
+    if (
+        args.target_frequency_hz is not None
+        or int(args.past_steps) != 4
+        or bool(args.include_current) is not True
+        or int(args.future_steps) != 16
+    ):
+        metadata = StateLatentMetadata(
+            frequency_hz=float(args.target_frequency_hz) if args.target_frequency_hz is not None else 50.0,
+            past_steps=int(args.past_steps),
+            include_current=bool(args.include_current),
+            future_steps=int(args.future_steps),
+        )
+    summary = build_from_vae_rollout(
+        args.vae_rollout,
+        args.output,
+        metadata=metadata,
+        motion_id=args.motion_id,
+        target_frequency_hz=args.target_frequency_hz,
+        compressed=not args.uncompressed,
+        state_representation=args.state_representation,
+        projection_seed=args.projection_seed,
+        acceptance_key=args.acceptance_key,
+        require_full_episode_accepted=args.require_full_episode_accepted,
+        episode_acceptance_seconds=args.episode_acceptance_seconds,
+    )
     print(json.dumps(summary, sort_keys=True))
     return 0
 
@@ -221,6 +269,20 @@ def main_audit_state_latent(argv: list[str] | None = None) -> int:
     return 0
 
 
+def main_merge_state_latent(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Merge Stage-3 state-latent shards.")
+    parser.add_argument("--dataset", dest="datasets", action="append", required=True)
+    parser.add_argument("--output", required=True)
+    parser.add_argument("--uncompressed", action="store_true", help="Write an uncompressed NPZ for faster training-time loading.")
+    add_output_seed(parser)
+    args = parser.parse_args(argv)
+    for path in args.datasets:
+        ensure_file(path, "--dataset")
+    summary = merge_state_latent_datasets(args.datasets, args.output, compressed=not args.uncompressed)
+    print(json.dumps(summary, sort_keys=True))
+    return 0
+
+
 def main_diffusion_train(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Train Stage-3 state-latent diffusion.")
     parser.add_argument("--state-latent-dataset", required=True)
@@ -235,7 +297,6 @@ def main_diffusion_train(argv: list[str] | None = None) -> int:
     add_output_seed(parser)
     args = parser.parse_args(argv)
     ensure_file(args.state_latent_dataset, "--state-latent-dataset")
-    load_state_latent_dataset(args.state_latent_dataset)
     if args.dry_run:
         summary = {"status": "dry_run_ok", "prediction_type": args.prediction_type}
         write_json(Path(args.output_dir) / "diffusion_train_summary.json", summary)
@@ -333,15 +394,30 @@ def main_isaac_entry(argv: list[str] | None = None, *, entrypoint: str) -> int:
     parser.add_argument("--num-envs", type=int, default=1)
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--teacher-map")
+    parser.add_argument("--motion-name")
+    parser.add_argument("--teacher-checkpoint")
+    parser.add_argument("--agent-config")
     parser.add_argument("--vae-checkpoint")
     parser.add_argument("--diffusion-checkpoint")
     parser.add_argument("--motion-file")
+    parser.add_argument("--output", help="Output NPZ path. Defaults under --output-dir.")
+    parser.add_argument("--steps", type=int, default=32)
+    parser.add_argument("--warmup-steps", type=int, default=1)
+    parser.add_argument("--frequency-hz", type=float, default=50.0)
+    parser.add_argument("--round-id", default="D1")
+    parser.add_argument("--disable-obs-noise", dest="disable_obs_noise", action="store_true", default=True)
+    parser.add_argument("--enable-obs-noise", dest="disable_obs_noise", action="store_false")
+    parser.add_argument("--disable-events", action="store_true", default=False)
+    parser.add_argument("--stochastic-vae", dest="deterministic", action="store_false", default=True)
+    parser.add_argument("--ou-sigma", type=float, default=0.0)
+    parser.add_argument("--ou-theta", type=float, default=0.8)
+    parser.add_argument("--ou-mu", type=float, default=0.0)
     parser.add_argument("--headless", dest="headless", action="store_true", default=True)
     parser.add_argument("--no-headless", dest="headless", action="store_false")
     parser.add_argument("--dry-run", action="store_true", help="Parse args/config only; do not launch Isaac.")
     add_output_seed(parser)
     args = parser.parse_args(argv)
-    for label in ["teacher_map", "vae_checkpoint", "diffusion_checkpoint", "motion_file"]:
+    for label in ["teacher_map", "teacher_checkpoint", "agent_config", "vae_checkpoint", "diffusion_checkpoint", "motion_file"]:
         value = getattr(args, label)
         if value:
             ensure_file(value, f"--{label.replace('_', '-')}")
@@ -364,11 +440,71 @@ def main_isaac_entry(argv: list[str] | None = None, *, entrypoint: str) -> int:
         require_isaac_app_launcher()
     except RuntimeError as exc:
         raise SystemExit(str(exc) or ISAAC_UNAVAILABLE_MESSAGE) from exc
-    summary = {
-        "status": "isaac_runtime_available",
-        "entrypoint": entrypoint,
-        "validation": "not validated on H20; requires RTX 4090 + Isaac Sim runtime",
-    }
+    sys.argv = [sys.argv[0]]
+    output = Path(args.output) if args.output else Path(args.output_dir) / f"{entrypoint}.npz"
+    app = launch_isaac_app(config)
+    completed = False
+    try:
+        from beyondmimic_repro.adapters.isaac.live_rollout import (
+            LiveRolloutConfig,
+            run_collect_dagger_round,
+            run_collect_diffusion_rollout,
+            run_collect_vae_rollout,
+        )
+
+        live_config = LiveRolloutConfig(
+            task_name=args.task_name,
+            num_envs=args.num_envs,
+            device=args.device,
+            output_path=output,
+            steps=args.steps,
+            warmup_steps=args.warmup_steps,
+            frequency_hz=args.frequency_hz,
+            disable_obs_noise=args.disable_obs_noise,
+            disable_events=args.disable_events,
+            deterministic=args.deterministic,
+            motion_name=args.motion_name,
+            motion_file=Path(args.motion_file) if args.motion_file else None,
+            teacher_map=Path(args.teacher_map) if args.teacher_map else None,
+            teacher_checkpoint=Path(args.teacher_checkpoint) if args.teacher_checkpoint else None,
+            agent_config=Path(args.agent_config) if args.agent_config else None,
+            vae_checkpoint=Path(args.vae_checkpoint) if args.vae_checkpoint else None,
+            diffusion_checkpoint=Path(args.diffusion_checkpoint) if args.diffusion_checkpoint else None,
+            round_id=args.round_id,
+            ou_sigma=args.ou_sigma,
+            ou_theta=args.ou_theta,
+            ou_mu=args.ou_mu,
+            seed=args.seed,
+        )
+        if entrypoint in {"collect_dagger_round", "collect_dagger_isaac"}:
+            summary = run_collect_dagger_round(live_config)
+        elif entrypoint in {"collect_vae_rollout", "eval_vae_closed_loop"}:
+            summary = run_collect_vae_rollout(live_config)
+        elif entrypoint == "eval_diffusion_closed_loop":
+            summary = run_collect_diffusion_rollout(live_config)
+        elif entrypoint == "eval_velocity_guidance":
+            summary = run_collect_diffusion_rollout(replace(live_config, guidance_mode="velocity", guidance_scale=0.1))
+        else:
+            summary = {
+                "status": "isaac_runtime_available",
+                "entrypoint": entrypoint,
+                "validation": "live rollout dispatch not implemented for this entrypoint yet",
+            }
+        completed = True
+    except Exception as exc:  # noqa: BLE001 - preserve Isaac failure details before closing Kit
+        error_summary = {
+            "status": "error",
+            "entrypoint": entrypoint,
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+            "traceback": traceback.format_exc(),
+        }
+        write_json(Path(args.output_dir) / f"{entrypoint}_error.json", error_summary)
+        print(json.dumps(error_summary, sort_keys=True), flush=True)
+        raise
+    finally:
+        if completed and hasattr(app, "close"):
+            app.close()
     write_json(Path(args.output_dir) / f"{entrypoint}_summary.json", summary)
     print(json.dumps(summary, sort_keys=True))
     return 0

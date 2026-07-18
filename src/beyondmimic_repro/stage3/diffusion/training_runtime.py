@@ -14,7 +14,7 @@ import yaml
 try:
     import torch
     from torch import nn
-    from torch.utils.data import DataLoader, Dataset, random_split
+    from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler, random_split
 except ImportError as exc:  # pragma: no cover
     raise ImportError("Install torch to use Stage-3 diffusion training runtime") from exc
 
@@ -45,6 +45,9 @@ class StateLatentArrayDataset(Dataset[tuple[torch.Tensor, torch.Tensor, torch.Te
         latents: np.ndarray,
         tokens: np.ndarray,
         *,
+        normalization_mean: np.ndarray | None = None,
+        normalization_std: np.ndarray | None = None,
+        sample_weight: np.ndarray | None = None,
         max_samples: int | None = None,
         seed: int = 0,
     ) -> None:
@@ -54,9 +57,27 @@ class StateLatentArrayDataset(Dataset[tuple[torch.Tensor, torch.Tensor, torch.Te
             indices = np.sort(rng.choice(count, size=max_samples, replace=False))
         else:
             indices = slice(None)
-        self.states = torch.from_numpy(np.asarray(states[indices], dtype=np.float32))
-        self.latents = torch.from_numpy(np.asarray(latents[indices], dtype=np.float32))
-        self.tokens = torch.from_numpy(np.asarray(tokens[indices], dtype=np.float32))
+        selected_tokens = np.asarray(tokens[indices], dtype=np.float32)
+        selected_states = np.asarray(states[indices], dtype=np.float32)
+        selected_latents = np.asarray(latents[indices], dtype=np.float32)
+        selected_weight = None if sample_weight is None else np.asarray(sample_weight[indices], dtype=np.float32)
+        if normalization_mean is not None and normalization_std is not None:
+            mean = np.asarray(normalization_mean, dtype=np.float32)
+            std = np.asarray(normalization_std, dtype=np.float32)
+            if mean.shape != (selected_tokens.shape[-1],) or std.shape != (selected_tokens.shape[-1],):
+                raise ValueError(
+                    "normalization mean/std must match token_dim, got "
+                    f"{mean.shape}, {std.shape}, token_dim={selected_tokens.shape[-1]}"
+                )
+            std = np.where(std < 1.0e-6, 1.0, std).astype(np.float32)
+            state_dim = selected_states.shape[-1]
+            selected_tokens = (selected_tokens - mean) / std
+            selected_states = (selected_states - mean[:state_dim]) / std[:state_dim]
+            selected_latents = (selected_latents - mean[state_dim:]) / std[state_dim:]
+        self.states = torch.from_numpy(selected_states)
+        self.latents = torch.from_numpy(selected_latents)
+        self.tokens = torch.from_numpy(selected_tokens)
+        self.sample_weight = None if selected_weight is None else torch.from_numpy(np.clip(selected_weight, 1.0e-6, None))
 
     def __len__(self) -> int:
         return int(self.tokens.shape[0])
@@ -72,6 +93,16 @@ def _split_dataset(dataset: Dataset[Any], validation_fraction: float, seed: int)
     val_count = min(val_count, len(dataset) - 1)
     train_count = len(dataset) - val_count
     return random_split(dataset, [train_count, val_count], generator=torch.Generator().manual_seed(seed))
+
+
+def _dataset_sample_weight(dataset: Dataset[Any]) -> torch.Tensor | None:
+    if isinstance(dataset, torch.utils.data.Subset):
+        parent_weight = getattr(dataset.dataset, "sample_weight", None)
+        if parent_weight is None:
+            return None
+        return parent_weight[dataset.indices]
+    weight = getattr(dataset, "sample_weight", None)
+    return weight
 
 
 def _build_model(token_dim: int, cfg: dict[str, Any]) -> StateLatentTransformer:
@@ -115,10 +146,16 @@ def _run_epoch(
     global_step: int,
     total_steps: int,
     warmup_steps: int,
+    state_dim: int,
+    loss_reduction: str,
+    state_loss_weight: float,
+    latent_loss_weight: float,
 ) -> tuple[dict[str, float], int]:
     training = optimizer is not None
     model.train(training)
     total_loss = 0.0
+    total_state_loss = 0.0
+    total_latent_loss = 0.0
     total_count = 0
     if training:
         optimizer.zero_grad(set_to_none=True)
@@ -145,7 +182,15 @@ def _run_epoch(
                 diffusion_steps = torch.stack([k_state, k_latent], dim=-1)
                 pred = model(noisy_tokens, diffusion_steps)
                 target = construct_training_target(clean_tokens, noise_tokens, prediction_type=prediction_type)
-                loss = torch.mean((pred - target) ** 2)
+                sq_error = (pred - target) ** 2
+                state_loss = torch.mean(sq_error[..., :state_dim])
+                latent_loss = torch.mean(sq_error[..., state_dim:])
+                if loss_reduction == "token_mean":
+                    loss = torch.mean(sq_error)
+                elif loss_reduction == "group_mean":
+                    loss = float(state_loss_weight) * state_loss + float(latent_loss_weight) * latent_loss
+                else:
+                    raise ValueError("loss.reduction must be 'token_mean' or 'group_mean'")
                 scaled_loss = loss / max(1, grad_accum)
             if not torch.isfinite(loss):
                 raise FloatingPointError("diffusion loss became NaN or Inf")
@@ -169,11 +214,18 @@ def _run_epoch(
                     optimizer.zero_grad(set_to_none=True)
                     if ema is not None:
                         ema.update(model)
-                global_step += 1
+                    global_step += 1
         batch = int(clean_tokens.shape[0])
         total_loss += float(loss.detach().cpu()) * batch
+        total_state_loss += float(state_loss.detach().cpu()) * batch
+        total_latent_loss += float(latent_loss.detach().cpu()) * batch
         total_count += batch
-    return {"loss": total_loss / max(1, total_count)}, global_step
+    count = max(1, total_count)
+    return {
+        "loss": total_loss / count,
+        "state_loss": total_state_loss / count,
+        "latent_loss": total_latent_loss / count,
+    }, global_step
 
 
 def _save_checkpoint(
@@ -231,18 +283,39 @@ def train_state_latent_diffusion_runtime(
     tokens = np.asarray(payload["tokens"], dtype=np.float32)
     if not np.all(np.isfinite(tokens)):
         raise ValueError("state-latent tokens contain NaN or Inf")
+    sample_weight = np.asarray(payload["sample_weight"], dtype=np.float32) if "sample_weight" in payload else None
+    if sample_weight is not None:
+        if sample_weight.shape != (tokens.shape[0],):
+            raise ValueError(f"sample_weight must have shape {(tokens.shape[0],)}, got {sample_weight.shape}")
+        if not np.all(np.isfinite(sample_weight)) or np.any(sample_weight <= 0.0):
+            raise ValueError("sample_weight must be finite and positive")
     training_cfg = cfg.get("training", {})
     diffusion_cfg = cfg.get("diffusion", {})
     ema_cfg = cfg.get("ema", {})
+    normalization_cfg = cfg.get("normalization", {})
+    loss_cfg = cfg.get("loss", {})
     prediction_type = prediction_type or str(cfg.get("prediction_type", "x0"))
     epochs = int(epochs if epochs is not None else training_cfg.get("epochs", 1))
-    batch_size = int(batch_size if batch_size is not None else training_cfg.get("per_device_batch_size", 128))
+    batch_size = int(
+        batch_size
+        if batch_size is not None
+        else training_cfg.get("per_device_batch_size", training_cfg.get("batch_size", 128))
+    )
     grad_accum = max(1, int(training_cfg.get("gradient_accumulation_steps", 1)))
     base_lr = float(training_cfg.get("learning_rate", 1e-4))
     weight_decay = float(training_cfg.get("weight_decay", 1e-3))
     max_grad_norm = float(training_cfg.get("max_grad_norm", 1.0))
     warmup_steps = int(training_cfg.get("warmup_steps", training_cfg.get("warmup", 10_000)))
     mixed_precision = str(training_cfg.get("mixed_precision", "fp32")).lower()
+    use_sample_weight = bool(training_cfg.get("use_sample_weight", sample_weight is not None))
+    resume_from_ema = bool(training_cfg.get("resume_from_ema", False))
+    reset_optimizer_on_resume = bool(training_cfg.get("reset_optimizer_on_resume", False))
+    early_cfg = training_cfg.get("early_stopping", {})
+    early_enabled = bool(early_cfg.get("enabled", False))
+    early_patience = int(early_cfg.get("patience", 50))
+    early_min_delta_relative = float(early_cfg.get("min_delta_relative", 0.001))
+    checkpoint_cfg = cfg.get("checkpoint", {})
+    milestone_epochs = {int(v) for v in checkpoint_cfg.get("milestone_epochs", [])}
     torch_device = torch.device(device)
     autocast_dtype: torch.dtype | None = None
     if torch_device.type == "cuda" and mixed_precision in {"bf16", "bfloat16"}:
@@ -252,9 +325,53 @@ def train_state_latent_diffusion_runtime(
     scaler = torch.amp.GradScaler("cuda", enabled=torch_device.type == "cuda" and autocast_dtype == torch.float16)
     denoising_steps = int(diffusion_cfg.get("denoising_steps", 20))
     alpha_bars = cosine_alpha_bar_schedule(denoising_steps, device=torch_device)
-    dataset = StateLatentArrayDataset(states, latents, tokens, max_samples=max_samples, seed=seed)
+    normalization_enabled = bool(normalization_cfg.get("enabled", False))
+    normalization_mean: np.ndarray | None = None
+    normalization_std: np.ndarray | None = None
+    if normalization_enabled:
+        if "normalization_mean" not in payload or "normalization_std" not in payload:
+            raise ValueError("normalization.enabled requires dataset normalization_mean and normalization_std")
+        normalization_mean = np.asarray(payload["normalization_mean"], dtype=np.float32)
+        normalization_std = np.asarray(payload["normalization_std"], dtype=np.float32)
+        if normalization_mean.shape != (tokens.shape[-1],) or normalization_std.shape != (tokens.shape[-1],):
+            raise ValueError(
+                "dataset normalization_mean/std must have shape "
+                f"({tokens.shape[-1]},), got {normalization_mean.shape}, {normalization_std.shape}"
+            )
+        normalization_std = np.where(normalization_std < 1.0e-6, 1.0, normalization_std).astype(np.float32)
+    loss_reduction = str(loss_cfg.get("reduction", "token_mean"))
+    state_loss_weight = float(loss_cfg.get("state_weight", 1.0))
+    latent_loss_weight = float(loss_cfg.get("latent_weight", 1.0))
+    dataset = StateLatentArrayDataset(
+        states,
+        latents,
+        tokens,
+        normalization_mean=normalization_mean,
+        normalization_std=normalization_std,
+        sample_weight=sample_weight,
+        max_samples=max_samples,
+        seed=seed,
+    )
     train_ds, val_ds = _split_dataset(dataset, validation_fraction, seed)
-    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=0, pin_memory=torch_device.type == "cuda")
+    train_weight = _dataset_sample_weight(train_ds) if use_sample_weight else None
+    train_sampler = None
+    shuffle_train = True
+    if train_weight is not None:
+        train_sampler = WeightedRandomSampler(
+            weights=train_weight.double(),
+            num_samples=len(train_ds),
+            replacement=True,
+            generator=torch.Generator().manual_seed(seed),
+        )
+        shuffle_train = False
+    train_loader = DataLoader(
+        train_ds,
+        batch_size=batch_size,
+        shuffle=shuffle_train,
+        sampler=train_sampler,
+        num_workers=0,
+        pin_memory=torch_device.type == "cuda",
+    )
     val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=0, pin_memory=torch_device.type == "cuda")
     model = _build_model(token_dim=tokens.shape[-1], cfg=cfg).to(torch_device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=base_lr, weight_decay=weight_decay)
@@ -268,19 +385,30 @@ def train_state_latent_diffusion_runtime(
     best_validation_loss = math.inf
     if resume_checkpoint:
         checkpoint = torch.load(resume_checkpoint, map_location=torch_device)
-        model.load_state_dict(checkpoint["model_state_dict"])
-        if "optimizer_state_dict" in checkpoint:
+        ema_state = checkpoint.get("ema_state_dict", {})
+        shadow = ema_state.get("shadow") if isinstance(ema_state, dict) else None
+        if resume_from_ema and shadow:
+            model_state = {key: value.to(torch_device) for key, value in checkpoint["model_state_dict"].items()}
+            model_state.update({key: value.to(torch_device) for key, value in shadow.items()})
+            model.load_state_dict(model_state)
+        else:
+            model.load_state_dict(checkpoint["model_state_dict"])
+        if "optimizer_state_dict" in checkpoint and not reset_optimizer_on_resume:
             optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         if "ema_state_dict" in checkpoint:
             ema_state = checkpoint["ema_state_dict"]
             ema.power = float(ema_state.get("power", ema.power))
             ema.max_decay = float(ema_state.get("max_decay", ema.max_decay))
             ema.num_updates = int(ema_state.get("num_updates", ema.num_updates))
-            ema.shadow = {k: v.to(torch_device) for k, v in ema_state.get("shadow", {}).items()}
-        start_epoch = int(checkpoint.get("epoch", 0))
-        global_step = int(checkpoint.get("global_step", 0))
-        best_validation_loss = float(checkpoint.get("best_validation_loss", math.inf))
-    total_steps = max(1, epochs * len(train_loader))
+            if resume_from_ema and shadow:
+                ema.shadow = {k: v.detach().clone().to(torch_device) for k, v in model.state_dict().items() if torch.is_floating_point(v)}
+            else:
+                ema.shadow = {k: v.to(torch_device) for k, v in ema_state.get("shadow", {}).items()}
+        start_epoch = 0 if reset_optimizer_on_resume else int(checkpoint.get("epoch", 0))
+        global_step = 0 if reset_optimizer_on_resume else int(checkpoint.get("global_step", 0))
+        best_validation_loss = math.inf if reset_optimizer_on_resume else float(checkpoint.get("best_validation_loss", math.inf))
+    optimizer_steps_per_epoch = max(1, math.ceil(len(train_loader) / grad_accum))
+    total_steps = max(1, epochs * optimizer_steps_per_epoch)
     metadata = {
         "dataset_path": str(dataset_path),
         "config_path": str(config_path),
@@ -300,10 +428,27 @@ def train_state_latent_diffusion_runtime(
         "gradient_accumulation_steps": grad_accum,
         "prediction_type": prediction_type,
         "mixed_precision": mixed_precision,
+        "normalization_enabled": normalization_enabled,
+        "sample_weight_enabled": bool(train_weight is not None),
+        "loss_reduction": loss_reduction,
+        "state_loss_weight": state_loss_weight,
+        "latent_loss_weight": latent_loss_weight,
+        "resume_checkpoint": str(resume_checkpoint) if resume_checkpoint else None,
+        "resume_from_ema": resume_from_ema,
+        "reset_optimizer_on_resume": reset_optimizer_on_resume,
     }
+    if normalization_enabled:
+        metadata["normalization_mean"] = normalization_mean.tolist() if normalization_mean is not None else None
+        metadata["normalization_std"] = normalization_std.tolist() if normalization_std is not None else None
     writer = _maybe_writer(output / "tensorboard")
     history: list[dict[str, float | int]] = []
+    history_path = output / "training_history.jsonl"
+    if start_epoch == 0:
+        history_path.write_text("", encoding="utf-8")
     started = time.time()
+    bad_epochs = 0
+    stopped_early = False
+    stop_reason: str | None = None
     for epoch in range(start_epoch + 1, start_epoch + epochs + 1):
         train_metrics, global_step = _run_epoch(
             model,
@@ -322,6 +467,10 @@ def train_state_latent_diffusion_runtime(
             global_step=global_step,
             total_steps=total_steps,
             warmup_steps=warmup_steps,
+            state_dim=states.shape[-1],
+            loss_reduction=loss_reduction,
+            state_loss_weight=state_loss_weight,
+            latent_loss_weight=latent_loss_weight,
         )
         if len(val_ds):
             val_metrics, _ = _run_epoch(
@@ -341,15 +490,36 @@ def train_state_latent_diffusion_runtime(
                 global_step=global_step,
                 total_steps=total_steps,
                 warmup_steps=warmup_steps,
+                state_dim=states.shape[-1],
+                loss_reduction=loss_reduction,
+                state_loss_weight=state_loss_weight,
+                latent_loss_weight=latent_loss_weight,
             )
         else:
-            val_metrics = {"loss": float("nan")}
-        row = {"epoch": epoch, "train_loss": train_metrics["loss"], "validation_loss": val_metrics["loss"]}
+            val_metrics = {"loss": float("nan"), "state_loss": float("nan"), "latent_loss": float("nan")}
+        row = {
+            "elapsed_s": time.time() - started,
+            "epoch": epoch,
+            "global_step": global_step,
+            "train_loss": train_metrics["loss"],
+            "train_state_loss": train_metrics["state_loss"],
+            "train_latent_loss": train_metrics["latent_loss"],
+            "validation_loss": val_metrics["loss"],
+            "validation_state_loss": val_metrics["state_loss"],
+            "validation_latent_loss": val_metrics["latent_loss"],
+        }
         history.append(row)
+        with history_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(row, sort_keys=True) + "\n")
+        print(json.dumps(row, sort_keys=True), flush=True)
         if writer is not None:
             writer.add_scalar("train_loss", train_metrics["loss"], epoch)
+            writer.add_scalar("train_state_loss", train_metrics["state_loss"], epoch)
+            writer.add_scalar("train_latent_loss", train_metrics["latent_loss"], epoch)
             if math.isfinite(val_metrics["loss"]):
                 writer.add_scalar("validation_loss", val_metrics["loss"], epoch)
+                writer.add_scalar("validation_state_loss", val_metrics["state_loss"], epoch)
+                writer.add_scalar("validation_latent_loss", val_metrics["latent_loss"], epoch)
         _save_checkpoint(
             output / "checkpoints" / "latest.pt",
             model=model,
@@ -362,6 +532,13 @@ def train_state_latent_diffusion_runtime(
             best_validation_loss=best_validation_loss,
         )
         comparable = val_metrics["loss"] if math.isfinite(val_metrics["loss"]) else train_metrics["loss"]
+        previous_best = best_validation_loss
+        relative_delta = math.inf
+        if math.isfinite(previous_best) and previous_best > 0.0:
+            relative_delta = (previous_best - comparable) / previous_best
+        improved_for_early_stop = comparable < previous_best and (
+            not math.isfinite(previous_best) or relative_delta >= early_min_delta_relative
+        )
         if comparable < best_validation_loss:
             best_validation_loss = comparable
             _save_checkpoint(
@@ -375,11 +552,38 @@ def train_state_latent_diffusion_runtime(
                 metadata=metadata,
                 best_validation_loss=best_validation_loss,
             )
+        if epoch in milestone_epochs:
+            _save_checkpoint(
+                output / "checkpoints" / f"epoch_{epoch}.pt",
+                model=model,
+                optimizer=optimizer,
+                ema=ema,
+                epoch=epoch,
+                global_step=global_step,
+                cfg=cfg,
+                metadata=metadata,
+                best_validation_loss=best_validation_loss,
+            )
+        if early_enabled:
+            if improved_for_early_stop:
+                bad_epochs = 0
+            else:
+                bad_epochs += 1
+            if bad_epochs >= early_patience:
+                stopped_early = True
+                stop_reason = (
+                    f"validation did not improve by relative {early_min_delta_relative:.6g} "
+                    f"for {early_patience} epochs"
+                )
+                print(json.dumps({"epoch": epoch, "status": "early_stopped", "reason": stop_reason}, sort_keys=True), flush=True)
+                break
     if writer is not None:
         writer.close()
     summary = {
         "status": "trained",
-        "epochs_completed": epochs,
+        "epochs_completed": len(history),
+        "stopped_early": stopped_early,
+        "stop_reason": stop_reason,
         "global_step": global_step,
         "best_validation_loss": best_validation_loss,
         "latest_checkpoint": str(output / "checkpoints" / "latest.pt"),
@@ -388,9 +592,5 @@ def train_state_latent_diffusion_runtime(
         "history": history,
         "elapsed_s": time.time() - started,
     }
-    (output / "training_history.jsonl").write_text(
-        "".join(json.dumps(row, sort_keys=True) + "\n" for row in history),
-        encoding="utf-8",
-    )
     (output / "summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return summary

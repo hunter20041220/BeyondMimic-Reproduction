@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run live Isaac velocity-guided diffusion+VAE walk-run-walk rollout."""
+"""Run live Isaac downstream guided diffusion+VAE rollout."""
 
 from __future__ import annotations
 
@@ -30,25 +30,34 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--output", required=True)
     parser.add_argument("--output-dir", default="outputs/isaac")
     parser.add_argument("--steps", type=int, default=32)
-    parser.add_argument("--warmup-steps", type=int, default=0)
     parser.add_argument("--frequency-hz", type=float, default=50.0)
-    parser.add_argument("--guidance-scale", type=float, default=0.1)
+    parser.add_argument("--guidance-mode", choices=["velocity", "speed", "turn", "waypoint", "obstacle", "inpainting"], required=True)
+    parser.add_argument("--guidance-scale", type=float, default=1.0)
     parser.add_argument("--guidance-clip-norm", type=float, default=1.0)
-    parser.add_argument("--physical-velocity-guidance", action="store_true")
-    parser.add_argument("--smooth-velocity-ramp", action="store_true")
-    parser.add_argument("--velocity-schedule", choices=["walk_run_walk", "walk_to_run", "legacy_thirds"], default="walk_run_walk")
-    parser.add_argument("--velocity-walk-seconds", type=float, default=4.0)
-    parser.add_argument("--velocity-ramp-seconds", type=float, default=7.0)
     parser.add_argument("--disable-diffusion-ema", dest="diffusion_use_ema", action="store_false", default=True)
     parser.add_argument("--diffusion-initial-noise-scale", type=float, default=1.0)
     parser.add_argument("--walk-velocity-x", type=float, default=0.4)
     parser.add_argument("--walk-velocity-y", type=float, default=0.0)
     parser.add_argument("--run-velocity-x", type=float, default=1.2)
     parser.add_argument("--run-velocity-y", type=float, default=0.0)
+    parser.add_argument("--turn-rate-z", type=float, default=0.8)
+    parser.add_argument("--waypoint-x", type=float, default=1.0)
+    parser.add_argument("--waypoint-y", type=float, default=0.0)
+    parser.add_argument("--absolute-waypoint", dest="waypoint_relative", action="store_false", default=True)
+    parser.add_argument("--waypoint-weight", type=float, default=1.0)
+    parser.add_argument("--obstacle-x", type=float, default=0.5)
+    parser.add_argument("--obstacle-y", type=float, default=0.0)
+    parser.add_argument("--absolute-obstacle", dest="obstacle_relative", action="store_false", default=True)
+    parser.add_argument("--obstacle-radius", type=float, default=0.25)
+    parser.add_argument("--obstacle-delta", type=float, default=0.1)
+    parser.add_argument("--obstacle-weight", type=float, default=1.0)
+    parser.add_argument("--inpaint-x", type=float, default=0.6)
+    parser.add_argument("--inpaint-y", type=float, default=0.0)
+    parser.add_argument("--absolute-inpaint", dest="inpaint_relative", action="store_false", default=True)
+    parser.add_argument("--inpaint-token-index", type=int, default=-1)
     parser.add_argument("--disable-obs-noise", dest="disable_obs_noise", action="store_true", default=True)
     parser.add_argument("--enable-obs-noise", dest="disable_obs_noise", action="store_false")
     parser.add_argument("--disable-events", action="store_true", default=False)
-    parser.add_argument("--physical-only-terminations", action="store_true", default=False)
     parser.add_argument("--seed", type=int, default=20260712)
 
 
@@ -81,7 +90,6 @@ def main() -> int:
             device=args.device,
             output_path=Path(args.output),
             steps=args.steps,
-            warmup_steps=args.warmup_steps,
             frequency_hz=args.frequency_hz,
             disable_obs_noise=args.disable_obs_noise,
             disable_events=args.disable_events,
@@ -92,26 +100,35 @@ def main() -> int:
             diffusion_checkpoint=Path(args.diffusion_checkpoint),
             diffusion_use_ema=args.diffusion_use_ema,
             diffusion_initial_noise_scale=args.diffusion_initial_noise_scale,
-            guidance_mode="velocity",
+            guidance_mode=args.guidance_mode,
             guidance_scale=args.guidance_scale,
             guidance_clip_norm=args.guidance_clip_norm,
-            physical_velocity_guidance=args.physical_velocity_guidance,
-            smooth_velocity_ramp=args.smooth_velocity_ramp,
-            velocity_schedule=args.velocity_schedule,
-            velocity_walk_seconds=args.velocity_walk_seconds,
-            velocity_ramp_seconds=args.velocity_ramp_seconds,
             walk_velocity_x=args.walk_velocity_x,
             walk_velocity_y=args.walk_velocity_y,
             run_velocity_x=args.run_velocity_x,
             run_velocity_y=args.run_velocity_y,
-            physical_only_terminations=args.physical_only_terminations,
+            turn_rate_z=args.turn_rate_z,
+            waypoint_x=args.waypoint_x,
+            waypoint_y=args.waypoint_y,
+            waypoint_relative=args.waypoint_relative,
+            waypoint_weight=args.waypoint_weight,
+            obstacle_x=args.obstacle_x,
+            obstacle_y=args.obstacle_y,
+            obstacle_relative=args.obstacle_relative,
+            obstacle_radius=args.obstacle_radius,
+            obstacle_delta=args.obstacle_delta,
+            obstacle_weight=args.obstacle_weight,
+            inpaint_x=args.inpaint_x,
+            inpaint_y=args.inpaint_y,
+            inpaint_relative=args.inpaint_relative,
+            inpaint_token_index=args.inpaint_token_index,
             seed=args.seed,
         )
         summary = run_collect_diffusion_rollout(config)
-        summary["validation_mode"] = f"velocity_guided_{args.velocity_schedule}"
+        summary["validation_mode"] = f"{args.guidance_mode}_guided_diffusion_closed_loop"
         output_dir = Path(args.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
-        (output_dir / "eval_velocity_guidance_summary.json").write_text(
+        (output_dir / f"eval_{args.guidance_mode}_guidance_summary.json").write_text(
             json.dumps(summary, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
@@ -123,12 +140,13 @@ def main() -> int:
         output_dir.mkdir(parents=True, exist_ok=True)
         error = {
             "status": "error",
-            "entrypoint": "eval_velocity_guidance",
+            "entrypoint": "eval_downstream_guidance",
+            "guidance_mode": args.guidance_mode,
             "error_type": type(exc).__name__,
             "error": str(exc),
             "traceback": traceback.format_exc(),
         }
-        (output_dir / "eval_velocity_guidance_error.json").write_text(
+        (output_dir / f"eval_{args.guidance_mode}_guidance_error.json").write_text(
             json.dumps(error, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )

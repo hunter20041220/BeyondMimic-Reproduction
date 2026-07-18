@@ -1,0 +1,46 @@
+schema_version: stage2-vae-full-50hz-d0-config-v1
+model:
+  encoder_input_dim: 67
+  decoder_proprio_dim: 96
+  latent_dim: 32
+  action_dim: 29
+  encoder_hidden_dims: [2048, 1024, 512]
+  decoder_hidden_dims: [2048, 1024, 512]
+  activation: ELU
+training:
+  learning_rate: 0.0005
+  kl_coefficient: 0.01
+  batch_size: 512
+  max_epochs: 1000
+  gradient_accumulation_steps: 15
+  mixed_precision: fp32
+validation:
+  split: environment_rollout
+  fraction: 0.10
+  early_stopping_metric: val_action_mse
+early_stopping:
+  enabled: true
+  patience: 50
+  min_delta_relative: 0.001
+checkpoint:
+  save_best_total_loss: true
+  save_best_action_mse: true
+  save_latest_every_epochs: 1
+  milestone_epochs: [10, 25, 50, 100, 200, 300, 500, 750, 1000]
+safety:
+  stop_on_nan: true
+  stop_on_inf: true
+augmentation:
+  sagittal_symmetry: true
+sampling:
+  motion_phase_balanced: true
+  phase_bins: 10
+data:
+  source: all available 50Hz Stage-1 teacher rollouts
+  asset_manifest: /shared_disk/zzy/BeyondMimic/stage2_full_50hz_unified/all_motion_50hz_teacher_manifest.json
+  control_frequency_hz: 50.0
+  sim_dt: 0.005
+  decimation: 4
+  joint_position_semantics: relative_to_default
+  encoder_reference_input: reference joint pos/vel + anchor error + anchor Rot6D
+  decoder_proprio_input: projected gravity + root twist + current joints + previous action

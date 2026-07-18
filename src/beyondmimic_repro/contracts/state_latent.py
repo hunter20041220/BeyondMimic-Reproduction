@@ -87,14 +87,22 @@ def save_state_latent_dataset(
     path: str | Path,
     payload: dict[str, np.ndarray],
     metadata: StateLatentMetadata | None = None,
+    *,
+    compressed: bool = True,
 ) -> dict[str, object]:
     """Save a Stage-3 state-latent dataset."""
     meta = metadata or StateLatentMetadata()
     checked = validate_state_latent_dataset(payload, metadata=meta)
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(output, **checked, metadata_json=json.dumps(asdict(meta), sort_keys=True))
-    return {"output": str(output), "schema_version": meta.schema_version, "window_count": int(checked["tokens"].shape[0])}
+    save_fn = np.savez_compressed if compressed else np.savez
+    save_fn(output, **checked, metadata_json=json.dumps(asdict(meta), sort_keys=True))
+    return {
+        "output": str(output),
+        "schema_version": meta.schema_version,
+        "window_count": int(checked["tokens"].shape[0]),
+        "compressed": bool(compressed),
+    }
 
 
 def load_state_latent_dataset(path: str | Path, *, allow_legacy_teacher_source: bool = False) -> tuple[dict[str, np.ndarray], StateLatentMetadata]:

@@ -103,7 +103,11 @@ def _previous_action(actions: np.ndarray) -> np.ndarray:
     return prev
 
 
-def build_vae_arrays_from_teacher_rollout(path: str | Path) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
+def build_vae_arrays_from_teacher_rollout(
+    path: str | Path,
+    *,
+    flatten: bool = True,
+) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
     """Build paper-shaped VAE arrays from a structured teacher rollout NPZ."""
     with np.load(path, allow_pickle=False) as data:
         keys = set(data.files)
@@ -130,7 +134,18 @@ def build_vae_arrays_from_teacher_rollout(path: str | Path) -> tuple[dict[str, n
             "ref_anchor_quat_w",
         }.issubset(keys):
             body_names = [str(v) for v in data["body_names"]] if "body_names" in keys else []
-            anchor_index = body_names.index("pelvis") if "pelvis" in body_names else 0
+            if "torso_link" in body_names:
+                anchor_name = "torso_link"
+                anchor_index = body_names.index(anchor_name)
+            elif "Torso" in body_names:
+                anchor_name = "Torso"
+                anchor_index = body_names.index(anchor_name)
+            elif "pelvis" in body_names:
+                anchor_name = "pelvis"
+                anchor_index = body_names.index(anchor_name)
+            else:
+                anchor_name = body_names[0] if body_names else "body_index_0"
+                anchor_index = 0
             teacher_action = np.asarray(data["teacher_action"], dtype=np.float32)
             current_anchor_pos = np.asarray(data["body_pos_w"], dtype=np.float32)[..., anchor_index, :]
             current_anchor_quat = np.asarray(data["body_quat_w"], dtype=np.float32)[..., anchor_index, :]
@@ -188,17 +203,20 @@ def build_vae_arrays_from_teacher_rollout(path: str | Path) -> tuple[dict[str, n
         metadata = {
             "source": source,
             "input_path": str(path),
-            "anchor_body_name": "pelvis",
+            "anchor_body_name": anchor_name if "anchor_name" in locals() else "precomputed_or_fallback",
             "quaternion_convention": "wxyz",
             "rot6d_convention": "first two rotation-matrix columns flattened row-major",
             "decoder_twist_frame": "root/body frame via inverse root quaternion",
             "projected_gravity_frame": "root/body frame",
             "joint_position_semantics": "Isaac rollout joint_pos tensor; verify relative-to-default against official observation manager before claims",
         }
-    return _flatten_training_arrays(arrays), metadata
+    _validate_training_arrays(arrays)
+    if flatten:
+        return _flatten_training_arrays(arrays), metadata
+    return arrays, metadata
 
 
-def _flatten_training_arrays(arrays: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+def _validate_training_arrays(arrays: dict[str, np.ndarray]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     enc = np.asarray(arrays["encoder_reference_input"], dtype=np.float32)
     pro = np.asarray(arrays["decoder_proprio_input"], dtype=np.float32)
     act = np.asarray(arrays["teacher_action"], dtype=np.float32)
@@ -212,6 +230,11 @@ def _flatten_training_arrays(arrays: dict[str, np.ndarray]) -> dict[str, np.ndar
         raise ValueError(f"VAE training arrays leading shapes mismatch: {enc.shape}, {pro.shape}, {act.shape}")
     for name, value in [("encoder_reference_input", enc), ("decoder_proprio_input", pro), ("teacher_action", act)]:
         _finite(name, value)
+    return enc, pro, act
+
+
+def _flatten_training_arrays(arrays: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+    enc, pro, act = _validate_training_arrays(arrays)
     return {
         "encoder_reference_input": enc.reshape(-1, enc.shape[-1]),
         "decoder_proprio_input": pro.reshape(-1, pro.shape[-1]),

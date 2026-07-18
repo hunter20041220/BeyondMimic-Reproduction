@@ -36,5 +36,5 @@ def require_isaac_app_launcher() -> Any:
 def launch_isaac_app(config: IsaacRunConfig) -> Any:
     """Launch Isaac before importing tasks."""
     app_launcher = require_isaac_app_launcher()
-    launcher = app_launcher(headless=config.headless)
+    launcher = app_launcher({"headless": config.headless, "device": config.device})
     return launcher.app
