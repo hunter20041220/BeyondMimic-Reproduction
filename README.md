@@ -3,7 +3,7 @@
 This repository provides a clean, research-oriented reproduction codebase for a
 BeyondMimic-style whole-body motion pipeline. It is an independent reproduction
 surface, not the official BeyondMimic implementation.
-
+https://arxiv.org/pdf/2508.08241
 ```text
 motion data
   -> teacher rollout contracts
